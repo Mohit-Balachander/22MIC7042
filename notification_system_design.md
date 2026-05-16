@@ -297,3 +297,20 @@ spawn_worker(worker_process)
 - Failed jobs are logged and identifiable for manual review
 - System is resumable after crash with no duplicate notifications
 
+# Stage 6
+
+## Priority Inbox Implementation
+
+### Approach
+
+Each notification is assigned a priority score based on two factors: type weight and recency. Placement has weight 3, Result has weight 2, and Event has weight 1. The score is computed as weight multiplied by a large constant plus the Unix timestamp in milliseconds. This ensures type weight is the dominant factor while recency breaks ties within the same type.
+
+Duplicate notifications are removed using a Set of IDs before scoring.
+
+### Maintaining Top 10 Efficiently with New Notifications
+
+As new notifications arrive via WebSocket, each new notification is scored and compared against the current minimum score in the top 10 list. If the new score is higher, the minimum is replaced and the list is re-sorted. This avoids re-fetching all notifications and keeps the operation at O(n) where n is 10.
+
+### Code
+
+See priorityInbox.js in notification_app_be folder.
