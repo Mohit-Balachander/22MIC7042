@@ -211,3 +211,34 @@ WHERE n.type = 'Placement'
 AND n.createdAt >= NOW() - INTERVAL '7 days';
 ```
 
+# Stage 4
+
+## Performance Optimization for Notification Fetching
+
+### Problem
+Fetching notifications on every page load causes repeated DB hits for the same data, overwhelming the database with 50,000 students.
+
+### Solutions
+
+#### 1. Server-Side Caching (Redis)
+Cache the notifications list per student in Redis with a TTL of 60 seconds. On page load, check Redis first. If cache hit, return cached data. If miss, query DB and store in Redis.
+
+Tradeoff: Students may see slightly stale notifications for up to 60 seconds. Write operations must invalidate the cache for that student.
+
+#### 2. Client-Side Caching
+Store fetched notifications in localStorage or React state. Only re-fetch when a WebSocket event signals a new notification.
+
+Tradeoff: Reduces server load significantly but requires careful cache invalidation logic on the frontend.
+
+#### 3. Pagination
+Never fetch all notifications at once. Fetch 10 or 20 at a time using page and limit query parameters.
+
+Tradeoff: Slightly more complex frontend logic but drastically reduces DB and network load.
+
+#### 4. WebSocket Push Instead of Poll
+Instead of fetching on every page load, use WebSockets to push only new notifications to the client in real time.
+
+Tradeoff: Requires maintaining persistent connections on the server which increases memory usage but eliminates unnecessary DB reads entirely.
+
+### Recommended Strategy
+Combine Redis caching with WebSocket push and pagination. On first load fetch paginated results from Redis-backed API. New notifications arrive via WebSocket and are prepended to the list without a full reload.
