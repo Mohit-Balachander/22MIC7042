@@ -242,3 +242,58 @@ Tradeoff: Requires maintaining persistent connections on the server which increa
 
 ### Recommended Strategy
 Combine Redis caching with WebSocket push and pagination. On first load fetch paginated results from Redis-backed API. New notifications arrive via WebSocket and are prepended to the list without a full reload.
+
+# Stage 5
+
+## Bulk Notification Redesign
+
+### Shortcomings of Current Implementation
+
+- Sequential processing: 50,000 students notified one by one, extremely slow
+- No error handling: if send_email fails for 200 students midway, they are skipped silently
+- No retry mechanism: failed notifications are lost permanently
+- Tight coupling: email and DB operations happen together with no separation
+- No progress tracking: if server crashes midway, no way to know who was already notified
+
+### What happens when send_email fails for 200 students?
+
+With the current implementation those 200 students never get the email and there is no record of failure. There is no way to identify and retry only the failed ones.
+
+### Should DB save and email sending happen together?
+
+No. DB insert should always happen first independently of email sending. The notification must be persisted regardless of whether email delivery succeeds. Email sending should be async and separate so failures in email do not affect the DB record.
+
+### Redesigned Approach
+
+Use a message queue. Push all student IDs into the queue at once. Multiple parallel workers pick jobs from the queue and process each student independently with retry logic.
+
+### Revised Pseudocode
+
+function notify_all(student_ids: array, message: string):
+for student_id in student_ids:
+enqueue_job({ student_id: student_id, message: message, retry_count: 0 })
+function worker_process(job):
+try:
+save_to_db(job.student_id, job.message)
+push_to_app(job.student_id, job.message)
+send_email(job.student_id, job.message)
+mark_job_complete(job)
+except error:
+if job.retry_count < 3:
+job.retry_count += 1
+re_enqueue_job(job)
+else:
+mark_job_failed(job)
+log_failure(job.student_id, error)
+function start_workers(concurrency: number):
+for i in range(concurrency):
+spawn_worker(worker_process)
+
+### Benefits
+
+- DB insert always happens first and is guaranteed
+- Email failures trigger automatic retry up to 3 times
+- Parallel workers process thousands of students simultaneously
+- Failed jobs are logged and identifiable for manual review
+- System is resumable after crash with no duplicate notifications
+
